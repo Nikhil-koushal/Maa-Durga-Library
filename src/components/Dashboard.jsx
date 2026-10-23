@@ -74,7 +74,7 @@ export default function Dashboard() {
     }
     return {
       totalSeats: TOTAL_SEATS,
-      occupied: members.length,
+      occupied: members.filter((m) => m.seat_no != null).length,
       available: remainingSeats.length,
       expiringSoon,
       expired,
@@ -82,38 +82,48 @@ export default function Dashboard() {
     }
   }, [members, remainingSeats])
 
-  async function handleSave(payload, previousSeatNo) {
-    if (previousSeatNo) {
-      const { error } = await supabase
-        .from('library_management')
-        .update(payload)
-        .eq('seat_no', previousSeatNo)
-        .select('seat_no')
-      if (error) return { error: error.message }
-    } else {
-      const { error } = await supabase.from('library_management').insert(payload).select('seat_no')
-      if (error) return { error: error.message }
-    }
-    setModalState(null)
-    await loadData()
-    return {}
+
+async function handleSave(payload, previousSeatNo, memberId) {
+  let result
+
+  if (memberId != null) {
+    result = await supabase
+      .from('library_management')
+      .update(payload)
+      .eq('id', memberId)
+  } else {
+    result = await supabase
+      .from('library_management')
+      .insert(payload)
   }
 
-  async function handleDelete(member) {
-    const ok = window.confirm(
-      `Remove ${member.first_name} ${member.last_name} from seat ${member.seat_no}? This cannot be undone.`
-    )
-    if (!ok) return
-    const { error } = await supabase
-      .from('library_management')
-      .delete()
-      .eq('seat_no', member.seat_no)
-    if (error) {
-      setErrorMsg(error.message)
-      return
-    }
-    await loadData()
+  if (result.error) return { error: result.error.message }
+
+  setModalState(null)
+  await loadData()
+  return {}
+}
+
+async function handleDelete(member) {
+  const ok = window.confirm(
+    `Remove ${member.first_name} ${member.last_name}${member.seat_no != null ? ` from seat ${member.seat_no}` : ''}? This cannot be undone.`
+  )
+
+  if (!ok) return
+
+  const { error } = await supabase
+    .from('library_management')
+    .delete()
+    .eq('id', member.id)
+
+  if (error) {
+    setErrorMsg(error.message)
+    return
   }
+
+  await loadData()
+}
+
 
   function handleSeatClick(seatNo, member) {
     if (member) {

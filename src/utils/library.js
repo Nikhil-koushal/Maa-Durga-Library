@@ -2,7 +2,7 @@
 // Kept dependency-free (no date-fns) since the date math here is simple
 // day-difference arithmetic on `YYYY-MM-DD` strings from Postgres.
 
-export const TOTAL_SEATS = 89
+export const TOTAL_SEATS = 85
 
 export function todayISO() {
   const d = new Date()

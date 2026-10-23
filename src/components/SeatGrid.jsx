@@ -1,4 +1,6 @@
+
 import { TOTAL_SEATS, formatSeat, getMemberStatus, statusColor } from '../utils/library'
+
 
 /**
  * Renders seats 1–89. A seat is "free" when it has no row in
@@ -15,7 +17,13 @@ export default function SeatGrid({ members, onSeatClick }) {
       {Array.from({ length: TOTAL_SEATS }, (_, i) => i + 1).map((seatNo) => {
         const member = bySeat.get(seatNo)
         const status = member ? getMemberStatus(member) : null
-        const color = member ? statusColor(status.code) : '#16a34a'
+       const color = !member
+  ? '#16a34a'
+  : status.code === 'EXPIRING_SOON'
+    ? statusColor(status.code)
+    : status.code === 'EXPIRED'
+      ? statusColor(status.code)
+      : '#374151'
         return (
           <button
             key={seatNo}

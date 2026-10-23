@@ -44,7 +44,7 @@ export default function MemberFormModal({ member, availableSeats, initialSeatNo,
     e.preventDefault()
     setError('')
 
-    if (!form.seat_no) return setError('Please choose a seat.')
+    
     if (!form.first_name.trim()) return setError('First name is required.')
     if (!form.last_name.trim()) return setError('Last name is required.')
     if (!form.phone_number.trim()) return setError('Phone number is required.')
@@ -55,7 +55,7 @@ export default function MemberFormModal({ member, availableSeats, initialSeatNo,
 
     setBusy(true)
     const payload = {
-      seat_no: Number(form.seat_no),
+      seat_no: form.seat_no === '' ? null : Number(form.seat_no),
       first_name: form.first_name.trim(),
       last_name: form.last_name.trim(),
       phone_number: form.phone_number.trim(),
@@ -65,7 +65,7 @@ export default function MemberFormModal({ member, availableSeats, initialSeatNo,
       due_payment: Number(form.due_payment) || 0,
       // expiry_date is a generated column on the server — never sent.
     }
-    const result = await onSave(payload, isEdit ? member.seat_no : null)
+    const result = await onSave(payload, isEdit ? member.seat_no : null, isEdit ? member.id : null)
     setBusy(false)
     if (result?.error) setError(result.error)
   }
