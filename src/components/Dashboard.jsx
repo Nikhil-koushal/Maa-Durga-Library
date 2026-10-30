@@ -10,6 +10,7 @@ import { TOTAL_SEATS, getMemberStatus } from '../utils/library'
 const TABS = [
   { key: 'all', label: 'All members' },
   { key: 'seats', label: 'Seat availability' },
+  { key: 'half_time', label: 'Half-time students' },
   { key: 'expiring', label: 'Expiring soon' },
   { key: 'expired', label: 'Expired' },
   { key: 'due', label: 'Payment due' },
@@ -52,6 +53,15 @@ export default function Dashboard() {
         return haystack.includes(q)
       })
     }
+    if (tab === 'half_time') {
+  list = list.filter((m) => m.student_type === 'half_time')
+} else if (tab === 'expiring') {
+  list = list.filter((m) => getMemberStatus(m).code === 'EXPIRING_SOON')
+} else if (tab === 'expired') {
+  list = list.filter((m) => getMemberStatus(m).code === 'EXPIRED')
+} else if (tab === 'due') {
+  list = list.filter((m) => m.due_payment > 0)
+}
     if (tab === 'expiring') {
       list = list.filter((m) => getMemberStatus(m).code === 'EXPIRING_SOON')
     } else if (tab === 'expired') {

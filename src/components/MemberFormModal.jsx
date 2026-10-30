@@ -1,5 +1,9 @@
+
 import { useState } from 'react'
+import { supabase } from '../lib/supabaseClient'
 import { todayISO } from '../utils/library'
+
+const BUCKET = 'student-documents'
 
 const emptyForm = {
   seat_no: '',
@@ -10,175 +14,389 @@ const emptyForm = {
   pay_amount: '',
   subscription_duration: 1,
   due_payment: 0,
+  student_type: 'regular',
+  start_time: '',
+  end_time: '',
+  profile_photo: null,
+  aadhaar_photo: null,
 }
 
-/**
- * Add/Edit form. `member` is null for "add", or an existing row for "edit".
- * `availableSeats` is the list of free seat numbers (plus the member's own
- * current seat, when editing, so it still appears as a choice).
- */
-export default function MemberFormModal({ member, availableSeats, initialSeatNo, onSave, onCancel }) {
+async function uploadPhoto(file, folder) {
+  if (!file) return null
+
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please select an image file.')
+  }
+
+  // Limit each image to 5 MB.
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error('Each image must be smaller than 5 MB.')
+  }
+
+  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const path = `${folder}/${crypto.randomUUID()}.${extension}`
+
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, file, {
+      contentType: file.type,
+      upsert: false,
+    })
+
+  if (error) throw error
+
+  // Save only the storage path, not the image binary or public URL.
+  return path
+}
+
+export default function MemberFormModal({
+  member,
+  availableSeats = [],
+  initialSeatNo,
+  onSave,
+  onCancel,
+}) {
   const isEdit = Boolean(member)
+
+  const [studentType, setStudentType] = useState(
+    member?.student_type || null
+  )
+
   const [form, setForm] = useState(() =>
     member
       ? {
-          seat_no: member.seat_no,
-          first_name: member.first_name,
-          last_name: member.last_name,
-          phone_number: member.phone_number,
-          admission_date: member.admission_date,
-          pay_amount: member.pay_amount,
-          subscription_duration: member.subscription_duration,
-          due_payment: member.due_payment,
+          ...emptyForm,
+          seat_no: member.seat_no == null ? '' : String(member.seat_no),
+          first_name: member.first_name || '',
+          last_name: member.last_name || '',
+          phone_number: member.phone_number || '',
+          admission_date: member.admission_date || todayISO(),
+          pay_amount: member.pay_amount ?? '',
+          subscription_duration: member.subscription_duration ?? 1,
+          due_payment: member.due_payment ?? 0,
+          student_type: member.student_type || 'regular',
+          start_time: member.start_time?.slice(0, 5) || '',
+          end_time: member.end_time?.slice(0, 5) || '',
+          profile_photo: null,
+          aadhaar_photo: null,
         }
-      : { ...emptyForm, seat_no: initialSeatNo ? String(initialSeatNo) : '' }
+      : {
+          ...emptyForm,
+          seat_no: initialSeatNo ? String(initialSeatNo) : '',
+        }
   )
+
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
   function update(field, value) {
-    setForm((f) => ({ ...f, [field]: value }))
+    setForm((current) => ({ ...current, [field]: value }))
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
 
-    
     if (!form.first_name.trim()) return setError('First name is required.')
     if (!form.last_name.trim()) return setError('Last name is required.')
     if (!form.phone_number.trim()) return setError('Phone number is required.')
-    if (!form.pay_amount || Number(form.pay_amount) <= 0)
+
+    if (!form.pay_amount || Number(form.pay_amount) <= 0) {
       return setError('Pay amount must be greater than 0.')
-    if (!form.subscription_duration || Number(form.subscription_duration) <= 0)
+    }
+
+    if (!form.subscription_duration || Number(form.subscription_duration) <= 0) {
       return setError('Subscription duration must be greater than 0.')
+    }
+
+    if (studentType === 'half_time') {
+      if (!form.start_time || !form.end_time) {
+        return setError('Start time and end time are required for half-time students.')
+      }
+
+      if (form.start_time >= form.end_time) {
+        return setError('End time must be later than start time.')
+      }
+    }
 
     setBusy(true)
-    const payload = {
-      seat_no: form.seat_no === '' ? null : Number(form.seat_no),
-      first_name: form.first_name.trim(),
-      last_name: form.last_name.trim(),
-      phone_number: form.phone_number.trim(),
-      admission_date: form.admission_date,
-      pay_amount: Number(form.pay_amount),
-      subscription_duration: Number(form.subscription_duration),
-      due_payment: Number(form.due_payment) || 0,
-      // expiry_date is a generated column on the server — never sent.
+
+    const uploadedPaths = []
+
+    try {
+      let profilePath = member?.profile_photo || null
+      let aadhaarPath = member?.aadhaar_photo || null
+
+      if (form.profile_photo) {
+        profilePath = await uploadPhoto(form.profile_photo, 'profiles')
+        uploadedPaths.push(profilePath)
+      }
+
+      if (form.aadhaar_photo) {
+        aadhaarPath = await uploadPhoto(form.aadhaar_photo, 'aadhaar')
+        uploadedPaths.push(aadhaarPath)
+      }
+
+      const payload = {
+        seat_no: form.seat_no === '' ? null : Number(form.seat_no),
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        phone_number: form.phone_number.trim(),
+        admission_date: form.admission_date,
+        pay_amount: Number(form.pay_amount),
+        subscription_duration: Number(form.subscription_duration),
+        due_payment: Number(form.due_payment) || 0,
+        student_type: studentType,
+        start_time: studentType === 'half_time' ? form.start_time : null,
+        end_time: studentType === 'half_time' ? form.end_time : null,
+        profile_photo: profilePath,
+        aadhaar_photo: aadhaarPath,
+        // expiry_date is generated by PostgreSQL; do not send it.
+      }
+
+      const result = await onSave(
+        payload,
+        isEdit ? member.seat_no : null,
+        isEdit ? member.id : null
+      )
+
+      if (result?.error) {
+        // Remove newly uploaded files if the database save fails.
+        if (uploadedPaths.length) {
+          await supabase.storage.from(BUCKET).remove(uploadedPaths)
+        }
+        setError(result.error)
+      }
+    } catch (err) {
+      if (uploadedPaths.length) {
+        await supabase.storage.from(BUCKET).remove(uploadedPaths)
+      }
+      setError(err.message || 'Unable to save student.')
+    } finally {
+      setBusy(false)
     }
-    const result = await onSave(payload, isEdit ? member.seat_no : null, isEdit ? member.id : null)
-    setBusy(false)
-    if (result?.error) setError(result.error)
   }
 
   const seatChoices = member
-    ? [member.seat_no, ...availableSeats.filter((s) => s !== member.seat_no)]
+    ? [
+        ...(member.seat_no == null ? [] : [member.seat_no]),
+        ...availableSeats.filter((s) => s !== member.seat_no),
+      ]
     : availableSeats
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <form className="modal-card" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-        <h2>{isEdit ? `Edit member — seat ${member.seat_no}` : 'Add new member'}</h2>
+      <form
+        className="modal-card"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        {!studentType ? (
+          <>
+            <h2>Select student type</h2>
+            <p>Choose which registration form you want to open.</p>
 
-        <div className="form-grid">
-          <label>
-            Seat
-            <select
-              value={form.seat_no}
-              onChange={(e) => update('seat_no', e.target.value)}
-              disabled={isEdit}
-            >
-              <option value="">Choose a seat…</option>
-              {seatChoices
-                .slice()
-                .sort((a, b) => a - b)
-                .map((s) => (
-                  <option key={s} value={s}>
-                    Seat {String(s).padStart(2, '0')}
-                  </option>
-                ))}
-            </select>
-          </label>
+            <div className="form-grid">
+              <button
+                type="button"
+                onClick={() => {
+                  setStudentType('regular')
+                  update('student_type', 'regular')
+                }}
+              >
+                Regular Student
+              </button>
 
-          <label>
-            First name
-            <input
-              value={form.first_name}
-              onChange={(e) => update('first_name', e.target.value)}
-              required
-            />
-          </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setStudentType('half_time')
+                  update('student_type', 'half_time')
+                }}
+              >
+                Half-time Student
+              </button>
+            </div>
 
-          <label>
-            Last name
-            <input
-              value={form.last_name || ''}
-              onChange={(e) => update('last_name', e.target.value)}
-              required
-            />
-          </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={onCancel}>
+                Cancel
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2>
+              {isEdit
+                ? `Edit member${member.seat_no != null ? ` — seat ${member.seat_no}` : ''}`
+                : `Add ${studentType === 'half_time' ? 'half-time' : 'regular'} student`}
+            </h2>
 
-          <label>
-            Phone number
-            <input
-              value={form.phone_number}
-              onChange={(e) => update('phone_number', e.target.value)}
-              required
-            />
-          </label>
+            {!isEdit && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setStudentType(null)}
+              >
+                Change student type
+              </button>
+            )}
 
-          <label>
-            Admission date
-            <input
-              type="date"
-              value={form.admission_date}
-              onChange={(e) => update('admission_date', e.target.value)}
-              required
-            />
-          </label>
+            <div className="form-grid">
+              <label>
+                Seat
+                <select
+                  value={form.seat_no}
+                  onChange={(e) => update('seat_no', e.target.value)}
+                  disabled={isEdit}
+                >
+                  <option value="">No seat</option>
+                  {seatChoices
+                    .filter((s) => s != null)
+                    .slice()
+                    .sort((a, b) => a - b)
+                    .map((s) => (
+                      <option key={s} value={s}>
+                        Seat {String(s).padStart(2, '0')}
+                      </option>
+                    ))}
+                </select>
+              </label>
 
-          <label>
-            Subscription (months)
-            <input
-              type="number"
-              min="1"
-              value={form.subscription_duration}
-              onChange={(e) => update('subscription_duration', e.target.value)}
-              required
-            />
-          </label>
+              <label>
+                First name
+                <input
+                  value={form.first_name}
+                  onChange={(e) => update('first_name', e.target.value)}
+                  required
+                />
+              </label>
 
-          <label>
-            Pay amount (₹)
-            <input
-              type="number"
-              min="1"
-              value={form.pay_amount}
-              onChange={(e) => update('pay_amount', e.target.value)}
-              required
-            />
-          </label>
+              <label>
+                Last name
+                <input
+                  value={form.last_name}
+                  onChange={(e) => update('last_name', e.target.value)}
+                  required
+                />
+              </label>
 
-          <label>
-            Due payment (₹)
-            <input
-              type="number"
-              min="0"
-              value={form.due_payment}
-              onChange={(e) => update('due_payment', e.target.value)}
-            />
-          </label>
-        </div>
+              <label>
+                Phone number
+                <input
+                  value={form.phone_number}
+                  onChange={(e) => update('phone_number', e.target.value)}
+                  required
+                />
+              </label>
 
-        {error && <p className="error-text">{error}</p>}
+              <label>
+                Admission date
+                <input
+                  type="date"
+                  value={form.admission_date}
+                  onChange={(e) => update('admission_date', e.target.value)}
+                  required
+                />
+              </label>
 
-        <div className="modal-actions">
-          <button type="button" className="secondary" onClick={onCancel}>
-            Cancel
-          </button>
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Add member'}
-          </button>
-        </div>
+              <label>
+                Subscription (months)
+                <input
+                  type="number"
+                  min="1"
+                  value={form.subscription_duration}
+                  onChange={(e) => update('subscription_duration', e.target.value)}
+                  required
+                />
+              </label>
+
+              <label>
+                Pay amount (₹)
+                <input
+                  type="number"
+                  min="1"
+                  value={form.pay_amount}
+                  onChange={(e) => update('pay_amount', e.target.value)}
+                  required
+                />
+              </label>
+
+              <label>
+                Due payment (₹)
+                <input
+                  type="number"
+                  min="0"
+                  value={form.due_payment}
+                  onChange={(e) => update('due_payment', e.target.value)}
+                />
+              </label>
+
+              {studentType === 'half_time' && (
+                <>
+                  <label>
+                    Start time
+                    <input
+                      type="time"
+                      value={form.start_time}
+                      onChange={(e) => update('start_time', e.target.value)}
+                      required
+                    />
+                  </label>
+
+                  <label>
+                    End time
+                    <input
+                      type="time"
+                      value={form.end_time}
+                      onChange={(e) => update('end_time', e.target.value)}
+                      required
+                    />
+                  </label>
+                </>
+              )}
+
+              <label>
+                Profile photo
+                {member?.profile_photo && (
+                  <small>Existing photo saved. Select a new file to replace it.</small>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) =>
+                    update('profile_photo', e.target.files?.[0] || null)
+                  }
+                />
+              </label>
+
+              <label>
+                Aadhaar card photo
+                {member?.aadhaar_photo && (
+                  <small>Existing photo saved. Select a new file to replace it.</small>
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) =>
+                    update('aadhaar_photo', e.target.files?.[0] || null)
+                  }
+                />
+              </label>
+            </div>
+
+            {error && <p className="error-text">{error}</p>}
+
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={onCancel}>
+                Cancel
+              </button>
+              <button type="submit" disabled={busy}>
+                {busy ? 'Saving…' : isEdit ? 'Save changes' : 'Add student'}
+              </button>
+            </div>
+          </>
+        )}
       </form>
     </div>
   )
